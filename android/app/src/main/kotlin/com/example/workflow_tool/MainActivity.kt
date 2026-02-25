@@ -4,10 +4,14 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -16,6 +20,25 @@ import java.io.IOException
 class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "workflow_tool/atomics"
+        private const val LAUNCH_EVENT_CHANNEL = "workflow_tool/launch_events"
+        private const val ACTION_RUN_WORKFLOW = "com.example.workflow_tool.RUN_WORKFLOW"
+        private const val EXTRA_WORKFLOW_ID = "workflowId"
+    }
+
+    private var pendingLaunchWorkflowId: String? = null
+    private var launchEventSink: EventChannel.EventSink? = null
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingLaunchWorkflowId = extractWorkflowIdFromIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val workflowId = extractWorkflowIdFromIntent(intent) ?: return
+        pendingLaunchWorkflowId = workflowId
+        launchEventSink?.success(workflowId)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -32,6 +55,17 @@ class MainActivity : FlutterActivity() {
                     result.error("EXECUTION_FAILED", e.message, null)
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, LAUNCH_EVENT_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    launchEventSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    launchEventSink = null
+                }
+            })
     }
 
     private fun handleCall(call: MethodCall): Any {
@@ -69,6 +103,18 @@ class MainActivity : FlutterActivity() {
             "searchApps" -> {
                 val query = call.argument<String>("query") ?: ""
                 searchApps(query)
+            }
+            "createPinnedWorkflowShortcut" -> {
+                val workflowId = call.argument<String>("workflowId")
+                    ?: throw IllegalArgumentException("workflowId 不能为空")
+                val workflowName = call.argument<String>("workflowName")
+                    ?: throw IllegalArgumentException("workflowName 不能为空")
+                createPinnedWorkflowShortcut(workflowId, workflowName)
+            }
+            "getInitialLaunchWorkflowId" -> {
+                val workflowId = pendingLaunchWorkflowId
+                pendingLaunchWorkflowId = null
+                workflowId ?: ""
             }
 
             else -> throw IllegalArgumentException("不支持的方法: ${call.method}")
@@ -212,5 +258,45 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             app.packageName
         }
+    }
+
+    private fun createPinnedWorkflowShortcut(workflowId: String, workflowName: String): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            throw UnsupportedOperationException("Android 8.0 以下不支持固定桌面快捷方式")
+        }
+        val shortcutManager = getSystemService(ShortcutManager::class.java)
+            ?: throw IllegalStateException("ShortcutManager 不可用")
+
+        if (!shortcutManager.isRequestPinShortcutSupported) {
+            throw UnsupportedOperationException("当前启动器不支持固定桌面快捷方式")
+        }
+
+        val shortcutIntent = Intent(this, MainActivity::class.java).apply {
+            action = ACTION_RUN_WORKFLOW
+            putExtra(EXTRA_WORKFLOW_ID, workflowId)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        val shortcut = ShortcutInfo.Builder(this, "workflow_$workflowId")
+            .setShortLabel(workflowName.take(20))
+            .setLongLabel("执行工作流: $workflowName")
+            .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
+            .setIntent(shortcutIntent)
+            .build()
+
+        val requested = shortcutManager.requestPinShortcut(shortcut, null)
+        if (!requested) {
+            throw IllegalStateException("系统未接受快捷方式请求")
+        }
+        return "已请求添加到桌面: $workflowName"
+    }
+
+    private fun extractWorkflowIdFromIntent(intent: Intent?): String? {
+        if (intent == null) {
+            return null
+        }
+        if (intent.action != ACTION_RUN_WORKFLOW) {
+            return null
+        }
+        return intent.getStringExtra(EXTRA_WORKFLOW_ID)
     }
 }

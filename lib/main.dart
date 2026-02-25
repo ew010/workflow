@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -162,6 +163,9 @@ class WorkflowStorage {
 
 class WorkflowRunner {
   static const MethodChannel _channel = MethodChannel('workflow_tool/atomics');
+  static const EventChannel _launchEventChannel = EventChannel(
+    'workflow_tool/launch_events',
+  );
 
   Future<String> runAction(WorkflowAction action) async {
     switch (action.type) {
@@ -206,6 +210,34 @@ class WorkflowRunner {
     return result
         .map((e) => InstalledApp.fromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
+  }
+
+  Future<String> createPinnedWorkflowShortcut({
+    required String workflowId,
+    required String workflowName,
+  }) async {
+    return await _channel.invokeMethod<String>('createPinnedWorkflowShortcut', {
+          'workflowId': workflowId,
+          'workflowName': workflowName,
+        }) ??
+        '已请求添加桌面快捷方式';
+  }
+
+  Future<String?> getInitialLaunchWorkflowId() async {
+    final id = await _channel.invokeMethod<String>(
+      'getInitialLaunchWorkflowId',
+    );
+    if (id == null || id.isEmpty) {
+      return null;
+    }
+    return id;
+  }
+
+  Stream<String> get launchWorkflowStream {
+    return _launchEventChannel
+        .receiveBroadcastStream()
+        .map((event) => event?.toString() ?? '')
+        .where((id) => id.isNotEmpty);
   }
 }
 
@@ -253,11 +285,22 @@ class _WorkflowHomePageState extends State<WorkflowHomePage> {
 
   bool _isLoading = true;
   List<WorkflowDefinition> _workflows = const [];
+  StreamSubscription<String>? _launchSub;
+  bool _initialShortcutHandled = false;
 
   @override
   void initState() {
     super.initState();
+    _launchSub = _runner.launchWorkflowStream.listen(
+      _runWorkflowByIdFromShortcut,
+    );
     _loadWorkflows();
+  }
+
+  @override
+  void dispose() {
+    _launchSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadWorkflows() async {
@@ -269,6 +312,19 @@ class _WorkflowHomePageState extends State<WorkflowHomePage> {
       _workflows = loaded;
       _isLoading = false;
     });
+    await _handleInitialShortcutLaunch();
+  }
+
+  Future<void> _handleInitialShortcutLaunch() async {
+    if (_initialShortcutHandled) {
+      return;
+    }
+    _initialShortcutHandled = true;
+    final workflowId = await _runner.getInitialLaunchWorkflowId();
+    if (!mounted || workflowId == null) {
+      return;
+    }
+    await _runWorkflowByIdFromShortcut(workflowId);
   }
 
   Future<void> _saveWorkflows(List<WorkflowDefinition> workflows) async {
@@ -332,8 +388,11 @@ class _WorkflowHomePageState extends State<WorkflowHomePage> {
     await _saveWorkflows(updated);
   }
 
-  Future<void> _runWorkflow(WorkflowDefinition workflow) async {
-    if (workflow.requireConfirmation) {
+  Future<void> _runWorkflow(
+    WorkflowDefinition workflow, {
+    bool skipConfirmation = false,
+  }) async {
+    if (workflow.requireConfirmation && !skipConfirmation) {
       final confirmed =
           await showDialog<bool>(
             context: context,
@@ -410,6 +469,42 @@ class _WorkflowHomePageState extends State<WorkflowHomePage> {
     );
   }
 
+  Future<void> _runWorkflowByIdFromShortcut(String workflowId) async {
+    final workflow = _workflows.where((e) => e.id == workflowId).firstOrNull;
+    if (workflow == null) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('快捷方式对应的工作流不存在，可能已被删除。')));
+      return;
+    }
+    await _runWorkflow(workflow, skipConfirmation: true);
+  }
+
+  Future<void> _addWorkflowToHome(WorkflowDefinition workflow) async {
+    try {
+      final message = await _runner.createPinnedWorkflowShortcut(
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on PlatformException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message ?? e.code)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -444,6 +539,11 @@ class _WorkflowHomePageState extends State<WorkflowHomePage> {
                           onPressed: () => _runWorkflow(workflow),
                           tooltip: '执行',
                           icon: const Icon(Icons.play_arrow),
+                        ),
+                        IconButton(
+                          onPressed: () => _addWorkflowToHome(workflow),
+                          tooltip: '添加到桌面',
+                          icon: const Icon(Icons.push_pin),
                         ),
                         IconButton(
                           onPressed: () => _editWorkflow(workflow),
