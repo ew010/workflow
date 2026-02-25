@@ -195,6 +195,32 @@ class WorkflowRunner {
             '完成';
     }
   }
+
+  Future<List<InstalledApp>> searchApps(String query) async {
+    final result = await _channel.invokeMethod<List<dynamic>>('searchApps', {
+      'query': query,
+    });
+    if (result == null) {
+      return const [];
+    }
+    return result
+        .map((e) => InstalledApp.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+}
+
+class InstalledApp {
+  const InstalledApp({required this.appName, required this.packageName});
+
+  final String appName;
+  final String packageName;
+
+  factory InstalledApp.fromJson(Map<String, dynamic> json) {
+    return InstalledApp(
+      appName: json['appName'] as String? ?? '',
+      packageName: json['packageName'] as String? ?? '',
+    );
+  }
 }
 
 class WorkflowApp extends StatelessWidget {
@@ -449,6 +475,7 @@ class WorkflowEditorPage extends StatefulWidget {
 }
 
 class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
+  final WorkflowRunner _runner = WorkflowRunner();
   late final TextEditingController _nameController;
   late List<WorkflowAction> _actions;
   late bool _requireConfirmation;
@@ -486,7 +513,12 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
         final epoch = action.params['epochMillis'] as int;
         return '手动时间: ${DateTime.fromMillisecondsSinceEpoch(epoch)}';
       case WorkflowActionType.openApp:
-        return '包名: ${action.params['packageName']}';
+        final appName = action.params['appName'] as String?;
+        final packageName = action.params['packageName'];
+        if (appName != null && appName.isNotEmpty) {
+          return '应用: $appName ($packageName)';
+        }
+        return '包名: $packageName';
     }
   }
 
@@ -578,20 +610,36 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
       case WorkflowActionType.setSystemTime:
         return _pickSystemTimeAction(existing: existing);
       case WorkflowActionType.openApp:
-        final packageName = await _askText(
-          title: '打开 App',
-          label: 'App 包名（例如 com.android.settings）',
-          initial: existing?.params['packageName'] as String?,
-        );
-        if (packageName == null || packageName.trim().isEmpty) {
+        final selected = await _pickApp(existing: existing);
+        if (selected == null) {
           return null;
         }
         return WorkflowAction(
           id: existing?.id ?? _newId(),
           type: type,
-          params: {'packageName': packageName.trim()},
+          params: {
+            'packageName': selected.packageName,
+            'appName': selected.appName,
+          },
         );
     }
+  }
+
+  Future<InstalledApp?> _pickApp({WorkflowAction? existing}) async {
+    final initialQuery =
+        existing?.params['appName'] as String? ??
+        existing?.params['packageName'] as String? ??
+        '';
+    final initialPackage = existing?.params['packageName'] as String?;
+
+    return showDialog<InstalledApp>(
+      context: context,
+      builder: (context) => _AppPickerDialog(
+        runner: _runner,
+        initialQuery: initialQuery,
+        initialPackage: initialPackage,
+      ),
+    );
   }
 
   Future<WorkflowAction?> _pickSystemTimeAction({
@@ -823,6 +871,145 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
           }),
         ],
       ),
+    );
+  }
+}
+
+class _AppPickerDialog extends StatefulWidget {
+  const _AppPickerDialog({
+    required this.runner,
+    required this.initialQuery,
+    this.initialPackage,
+  });
+
+  final WorkflowRunner runner;
+  final String initialQuery;
+  final String? initialPackage;
+
+  @override
+  State<_AppPickerDialog> createState() => _AppPickerDialogState();
+}
+
+class _AppPickerDialogState extends State<_AppPickerDialog> {
+  late final TextEditingController _queryController;
+  late final TextEditingController _packageController;
+  List<InstalledApp> _results = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _queryController = TextEditingController(text: widget.initialQuery);
+    _packageController = TextEditingController(
+      text: widget.initialPackage ?? '',
+    );
+    _search();
+  }
+
+  @override
+  void dispose() {
+    _queryController.dispose();
+    _packageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    setState(() {
+      _loading = true;
+    });
+    try {
+      final data = await widget.runner.searchApps(_queryController.text.trim());
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _results = data;
+      });
+    } on PlatformException {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _results = const [];
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('选择 App'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 420,
+        child: Column(
+          children: [
+            TextField(
+              controller: _queryController,
+              decoration: InputDecoration(
+                labelText: '按应用名搜索',
+                suffixIcon: IconButton(
+                  onPressed: _search,
+                  icon: const Icon(Icons.search),
+                  tooltip: '搜索',
+                ),
+              ),
+              onSubmitted: (_) => _search(),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _packageController,
+              decoration: const InputDecoration(labelText: '包名（可手动输入）'),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _results.isEmpty
+                  ? const Center(child: Text('没有搜索结果'))
+                  : ListView.builder(
+                      itemCount: _results.length,
+                      itemBuilder: (context, index) {
+                        final app = _results[index];
+                        return ListTile(
+                          dense: true,
+                          title: Text(app.appName),
+                          subtitle: Text(app.packageName),
+                          onTap: () {
+                            Navigator.pop(context, app);
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final packageName = _packageController.text.trim();
+            if (packageName.isEmpty) {
+              return;
+            }
+            Navigator.pop(
+              context,
+              InstalledApp(appName: packageName, packageName: packageName),
+            );
+          },
+          child: const Text('使用包名'),
+        ),
+      ],
     );
   }
 }

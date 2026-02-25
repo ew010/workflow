@@ -2,6 +2,7 @@ package com.example.workflow_tool
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
@@ -33,7 +34,7 @@ class MainActivity : FlutterActivity() {
             }
     }
 
-    private fun handleCall(call: MethodCall): String {
+    private fun handleCall(call: MethodCall): Any {
         return when (call.method) {
             "deleteFolder" -> {
                 val path = call.argument<String>("path")
@@ -64,6 +65,10 @@ class MainActivity : FlutterActivity() {
                 val packageName = call.argument<String>("packageName")
                     ?: throw IllegalArgumentException("packageName 不能为空")
                 openApp(packageName)
+            }
+            "searchApps" -> {
+                val query = call.argument<String>("query") ?: ""
+                searchApps(query)
             }
 
             else -> throw IllegalArgumentException("不支持的方法: ${call.method}")
@@ -172,5 +177,40 @@ class MainActivity : FlutterActivity() {
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(launchIntent)
         return "已打开应用: $packageName"
+    }
+
+    private fun searchApps(query: String): List<Map<String, String>> {
+        val normalized = query.trim().lowercase()
+        val apps = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+
+        return apps
+            .filter { app -> packageManager.getLaunchIntentForPackage(app.packageName) != null }
+            .map { app ->
+                mapOf(
+                    "appName" to packageManager.getApplicationLabelSafe(app),
+                    "packageName" to app.packageName
+                )
+            }
+            .filter { app ->
+                if (normalized.isEmpty()) {
+                    true
+                } else {
+                    app["appName"]!!.lowercase().contains(normalized) ||
+                        app["packageName"]!!.lowercase().contains(normalized)
+                }
+            }
+            .sortedWith(
+                compareBy<Map<String, String>> { it["appName"]!!.lowercase() }
+                    .thenBy { it["packageName"]!! }
+            )
+            .take(200)
+    }
+
+    private fun PackageManager.getApplicationLabelSafe(app: ApplicationInfo): String {
+        return try {
+            getApplicationLabel(app).toString()
+        } catch (_: Exception) {
+            app.packageName
+        }
     }
 }
