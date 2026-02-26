@@ -170,11 +170,13 @@ class WorkflowRunner {
   Future<String> runAction(WorkflowAction action) async {
     switch (action.type) {
       case WorkflowActionType.deleteFolder:
+        await _ensureFileOperationPermission();
         return await _channel.invokeMethod<String>('deleteFolder', {
               'path': action.params['path'],
             }) ??
             '完成';
       case WorkflowActionType.copyFolder:
+        await _ensureFileOperationPermission();
         return await _channel.invokeMethod<String>('copyFolder', {
               'sourcePath': action.params['sourcePath'],
               'targetPath': action.params['targetPath'],
@@ -198,6 +200,19 @@ class WorkflowRunner {
             }) ??
             '完成';
     }
+  }
+
+  Future<void> _ensureFileOperationPermission() async {
+    final granted =
+        await _channel.invokeMethod<bool>('canManageAllFilesAccess') ?? false;
+    if (granted) {
+      return;
+    }
+    await _channel.invokeMethod<String>('requestManageAllFilesAccess');
+    throw PlatformException(
+      code: 'FILE_PERMISSION_REQUIRED',
+      message: '请先授予“所有文件访问权限”后再执行删除/复制操作。',
+    );
   }
 
   Future<List<InstalledApp>> searchApps(String query) async {

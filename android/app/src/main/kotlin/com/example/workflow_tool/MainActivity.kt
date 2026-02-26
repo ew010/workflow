@@ -8,6 +8,7 @@ import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -73,6 +74,7 @@ class MainActivity : FlutterActivity() {
             "deleteFolder" -> {
                 val path = call.argument<String>("path")
                     ?: throw IllegalArgumentException("path 不能为空")
+                ensureFileOperationPermission()
                 deleteFolder(path)
             }
 
@@ -81,6 +83,7 @@ class MainActivity : FlutterActivity() {
                     ?: throw IllegalArgumentException("sourcePath 不能为空")
                 val targetPath = call.argument<String>("targetPath")
                     ?: throw IllegalArgumentException("targetPath 不能为空")
+                ensureFileOperationPermission()
                 copyFolder(sourcePath, targetPath)
             }
 
@@ -116,6 +119,12 @@ class MainActivity : FlutterActivity() {
                 pendingLaunchWorkflowId = null
                 workflowId ?: ""
             }
+            "canManageAllFilesAccess" -> {
+                canManageAllFilesAccess()
+            }
+            "requestManageAllFilesAccess" -> {
+                requestManageAllFilesAccess()
+            }
 
             else -> throw IllegalArgumentException("不支持的方法: ${call.method}")
         }
@@ -130,7 +139,7 @@ class MainActivity : FlutterActivity() {
             throw IllegalArgumentException("目标不是文件夹: $path")
         }
         if (!target.deleteRecursively() && target.exists()) {
-            throw IOException("删除失败: $path")
+            throw SecurityException("删除失败，可能没有目录写入权限: $path")
         }
         return "删除成功: $path"
     }
@@ -298,5 +307,38 @@ class MainActivity : FlutterActivity() {
             return null
         }
         return intent.getStringExtra(EXTRA_WORKFLOW_ID)
+    }
+
+    private fun ensureFileOperationPermission() {
+        if (!canManageAllFilesAccess()) {
+            requestManageAllFilesAccess()
+            throw SecurityException("请先授予“所有文件访问权限”后重试工作流。")
+        }
+    }
+
+    private fun canManageAllFilesAccess(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager()
+        }
+        return true
+    }
+
+    private fun requestManageAllFilesAccess(): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return "当前 Android 版本不需要“所有文件访问权限”。"
+        }
+        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+            data = android.net.Uri.parse("package:$packageName")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(fallbackIntent)
+        }
+        return "已打开“所有文件访问权限”设置页，请授权后重试。"
     }
 }
