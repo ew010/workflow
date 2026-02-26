@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -687,7 +688,7 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
   }) async {
     switch (type) {
       case WorkflowActionType.deleteFolder:
-        final path = await _askText(
+        final path = await _askDirectoryPath(
           title: '删除文件夹',
           label: '文件夹路径',
           initial: existing?.params['path'] as String?,
@@ -701,7 +702,7 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
           params: {'path': path.trim()},
         );
       case WorkflowActionType.copyFolder:
-        final source = await _askText(
+        final source = await _askDirectoryPath(
           title: '复制文件夹',
           label: '源文件夹路径',
           initial: existing?.params['sourcePath'] as String?,
@@ -709,7 +710,7 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
         if (source == null || source.trim().isEmpty) {
           return null;
         }
-        final target = await _askText(
+        final target = await _askDirectoryPath(
           title: '复制文件夹',
           label: '目标文件夹路径',
           initial: existing?.params['targetPath'] as String?,
@@ -839,7 +840,7 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
     );
   }
 
-  Future<String?> _askText({
+  Future<String?> _askDirectoryPath({
     required String title,
     required String label,
     String? initial,
@@ -847,20 +848,47 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
     final controller = TextEditingController(text: initial ?? '');
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(labelText: label),
-          autofocus: true,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                labelText: label,
+                suffixIcon: IconButton(
+                  tooltip: '选择文件夹',
+                  icon: const Icon(Icons.folder_open),
+                  onPressed: () async {
+                    final selected = await FilePicker.platform
+                        .getDirectoryPath();
+                    if (selected == null || !dialogContext.mounted) {
+                      return;
+                    }
+                    controller.text = selected;
+                  },
+                ),
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '可手动输入，也可点击右侧文件夹图标选择目录。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
             child: const Text('确认'),
           ),
         ],
