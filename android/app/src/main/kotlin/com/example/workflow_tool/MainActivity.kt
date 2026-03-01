@@ -87,6 +87,13 @@ class MainActivity : FlutterActivity() {
                 copyFolder(sourcePath, targetPath)
             }
 
+            "createFolder" -> {
+                val path = call.argument<String>("path")
+                    ?: throw IllegalArgumentException("path 不能为空")
+                ensureFileOperationPermission()
+                createFolder(path)
+            }
+
             "setSystemTimeManual" -> {
                 val epochMillis = call.argument<Number>("epochMillis")?.toLong()
                     ?: throw IllegalArgumentException("epochMillis 不能为空")
@@ -153,6 +160,17 @@ class MainActivity : FlutterActivity() {
         val target = File(targetPath)
         copyDirectory(source, target)
         return "复制成功: $sourcePath -> $targetPath"
+    }
+
+    private fun createFolder(path: String): String {
+        val target = File(path)
+        if (target.exists()) {
+            return "文件夹已存在: $path"
+        }
+        if (target.mkdirs()) {
+            return "创建成功: $path"
+        }
+        throw IOException("创建文件夹失败: $path")
     }
 
     private fun copyDirectory(source: File, target: File) {

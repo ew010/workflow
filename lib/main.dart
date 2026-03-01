@@ -10,7 +10,7 @@ void main() {
   runApp(const WorkflowApp());
 }
 
-enum WorkflowActionType { deleteFolder, copyFolder, setSystemTime, openApp }
+enum WorkflowActionType { deleteFolder, copyFolder, createFolder, setSystemTime, openApp }
 
 enum ExecutionFailurePolicy { stop, continueOnError }
 
@@ -32,6 +32,8 @@ extension WorkflowActionTypeX on WorkflowActionType {
         return '删除文件夹';
       case WorkflowActionType.copyFolder:
         return '复制文件夹';
+      case WorkflowActionType.createFolder:
+        return '创建文件夹';
       case WorkflowActionType.setSystemTime:
         return '设置系统时间';
       case WorkflowActionType.openApp:
@@ -181,6 +183,12 @@ class WorkflowRunner {
         return await _channel.invokeMethod<String>('copyFolder', {
               'sourcePath': action.params['sourcePath'],
               'targetPath': action.params['targetPath'],
+            }) ??
+            '完成';
+      case WorkflowActionType.createFolder:
+        await _ensureFileOperationPermission();
+        return await _channel.invokeMethod<String>('createFolder', {
+              'path': action.params['path'],
             }) ??
             '完成';
       case WorkflowActionType.setSystemTime:
@@ -621,6 +629,8 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
         return '路径: ${action.params['path']}';
       case WorkflowActionType.copyFolder:
         return '源: ${action.params['sourcePath']} -> 目标: ${action.params['targetPath']}';
+      case WorkflowActionType.createFolder:
+        return '路径: ${action.params['path']}';
       case WorkflowActionType.setSystemTime:
         final mode = action.params['mode'];
         if (mode == 'auto') {
@@ -722,6 +732,20 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
           id: existing?.id ?? _newId(),
           type: type,
           params: {'sourcePath': source.trim(), 'targetPath': target.trim()},
+        );
+      case WorkflowActionType.createFolder:
+        final path = await _askDirectoryPath(
+          title: '创建文件夹',
+          label: '文件夹路径',
+          initial: existing?.params['path'] as String?,
+        );
+        if (path == null || path.trim().isEmpty) {
+          return null;
+        }
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {'path': path.trim()},
         );
       case WorkflowActionType.setSystemTime:
         return _pickSystemTimeAction(existing: existing);
