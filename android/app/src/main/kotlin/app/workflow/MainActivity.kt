@@ -1,4 +1,4 @@
-package com.example.workflow_tool
+package app.workflow
 
 import android.Manifest
 import android.content.Intent
@@ -22,7 +22,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "workflow_tool/atomics"
         private const val LAUNCH_EVENT_CHANNEL = "workflow_tool/launch_events"
-        private const val ACTION_RUN_WORKFLOW = "com.example.workflow_tool.RUN_WORKFLOW"
+        private const val ACTION_RUN_WORKFLOW = "app.workflow.RUN_WORKFLOW"
         private const val EXTRA_WORKFLOW_ID = "workflowId"
     }
 
