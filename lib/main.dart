@@ -10,7 +10,7 @@ void main() {
   runApp(const WorkflowApp());
 }
 
-enum WorkflowActionType { deleteFolder, copyFolder, createFolder, setSystemTime, openApp }
+enum WorkflowActionType { deleteFolder, copyFolder, createFolder, setSystemTime, openApp, enableWifi, disableWifi, toggleWifi, enableBluetooth, disableBluetooth }
 
 enum ExecutionFailurePolicy { stop, continueOnError }
 
@@ -38,6 +38,16 @@ extension WorkflowActionTypeX on WorkflowActionType {
         return '设置系统时间';
       case WorkflowActionType.openApp:
         return '打开 App';
+      case WorkflowActionType.enableWifi:
+        return '开启 WiFi';
+      case WorkflowActionType.disableWifi:
+        return '关闭 WiFi';
+      case WorkflowActionType.toggleWifi:
+        return '切换 WiFi';
+      case WorkflowActionType.enableBluetooth:
+        return '开启蓝牙';
+      case WorkflowActionType.disableBluetooth:
+        return '关闭蓝牙';
     }
   }
 }
@@ -206,6 +216,28 @@ class WorkflowRunner {
       case WorkflowActionType.openApp:
         return await _channel.invokeMethod<String>('openApp', {
               'packageName': action.params['packageName'],
+            }) ??
+            '完成';
+      case WorkflowActionType.enableWifi:
+        return await _channel.invokeMethod<String>('setWifiEnabled', {
+              'enabled': true,
+            }) ??
+            '完成';
+      case WorkflowActionType.disableWifi:
+        return await _channel.invokeMethod<String>('setWifiEnabled', {
+              'enabled': false,
+            }) ??
+            '完成';
+      case WorkflowActionType.toggleWifi:
+        return await _channel.invokeMethod<String>('toggleWifi', {}) ?? '完成';
+      case WorkflowActionType.enableBluetooth:
+        return await _channel.invokeMethod<String>('setBluetoothEnabled', {
+              'enabled': true,
+            }) ??
+            '完成';
+      case WorkflowActionType.disableBluetooth:
+        return await _channel.invokeMethod<String>('setBluetoothEnabled', {
+              'enabled': false,
             }) ??
             '完成';
     }
@@ -645,6 +677,16 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
           return '应用: $appName ($packageName)';
         }
         return '包名: $packageName';
+      case WorkflowActionType.enableWifi:
+        return '开启 WiFi';
+      case WorkflowActionType.disableWifi:
+        return '关闭 WiFi';
+      case WorkflowActionType.toggleWifi:
+        return '切换 WiFi 状态';
+      case WorkflowActionType.enableBluetooth:
+        return '开启蓝牙';
+      case WorkflowActionType.disableBluetooth:
+        return '关闭蓝牙';
     }
   }
 
@@ -761,6 +803,36 @@ class _WorkflowEditorPageState extends State<WorkflowEditorPage> {
             'packageName': selected.packageName,
             'appName': selected.appName,
           },
+        );
+      case WorkflowActionType.enableWifi:
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {},
+        );
+      case WorkflowActionType.disableWifi:
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {},
+        );
+      case WorkflowActionType.toggleWifi:
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {},
+        );
+      case WorkflowActionType.enableBluetooth:
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {},
+        );
+      case WorkflowActionType.disableBluetooth:
+        return WorkflowAction(
+          id: existing?.id ?? _newId(),
+          type: type,
+          params: {},
         );
     }
   }

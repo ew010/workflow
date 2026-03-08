@@ -1,12 +1,16 @@
 package app.workflow
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
@@ -131,6 +135,17 @@ class MainActivity : FlutterActivity() {
             }
             "requestManageAllFilesAccess" -> {
                 requestManageAllFilesAccess()
+            }
+            "setWifiEnabled" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: true
+                setWifiEnabled(enabled)
+            }
+            "toggleWifi" -> {
+                toggleWifi()
+            }
+            "setBluetoothEnabled" -> {
+                val enabled = call.argument<Boolean>("enabled") ?: true
+                setBluetoothEnabled(enabled)
             }
 
             else -> throw IllegalArgumentException("不支持的方法: ${call.method}")
@@ -330,7 +345,7 @@ class MainActivity : FlutterActivity() {
     private fun ensureFileOperationPermission() {
         if (!canManageAllFilesAccess()) {
             requestManageAllFilesAccess()
-            throw SecurityException("请先授予“所有文件访问权限”后重试工作流。")
+            throw SecurityException("请先授予所有文件访问权限后重试工作流。")
         }
     }
 
@@ -343,7 +358,7 @@ class MainActivity : FlutterActivity() {
 
     private fun requestManageAllFilesAccess(): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return "当前 Android 版本不需要“所有文件访问权限”。"
+            return "当前 Android 版本不需要所有文件访问权限。"
         }
         val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
             data = android.net.Uri.parse("package:$packageName")
@@ -357,6 +372,91 @@ class MainActivity : FlutterActivity() {
             }
             startActivity(fallbackIntent)
         }
-        return "已打开“所有文件访问权限”设置页，请授权后重试。"
+        return "已打开所有文件访问权限设置页，请授权后重试。"
+    }
+
+    private fun setWifiEnabled(enabled: Boolean): String {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: throw IllegalStateException("无法获取 WiFiManager")
+
+        // Android 10+ 无法直接开关 WiFi，需要引导用户到设置页
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            return "Android 10+ 限制直接控制 WiFi，已打开 WiFi 设置页，请手动${if (enabled) "开启" else "关闭"}"
+        }
+
+        // Android 9 及以下可以直接控制
+        if (!wifiManager.isWifiEnabled && enabled) {
+            @Suppress("DEPRECATION")
+            wifiManager.isWifiEnabled = true
+            return "WiFi 已开启"
+        } else if (wifiManager.isWifiEnabled && !enabled) {
+            @Suppress("DEPRECATION")
+            wifiManager.isWifiEnabled = false
+            return "WiFi 已关闭"
+        }
+        return "WiFi 状态未改变（当前已${if (enabled) "开启" else "关闭"}）"
+    }
+
+    private fun toggleWifi(): String {
+        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: throw IllegalStateException("无法获取 WiFiManager")
+
+        // Android 10+ 无法直接开关 WiFi，需要引导用户到设置页
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            return "Android 10+ 限制直接控制 WiFi，已打开 WiFi 设置页，请手动切换"
+        }
+
+        // Android 9 及以下可以直接控制
+        @Suppress("DEPRECATION")
+        val newState = !wifiManager.isWifiEnabled
+        wifiManager.isWifiEnabled = newState
+        return "WiFi 已${if (newState) "开启" else "关闭"}"
+    }
+
+    private fun setBluetoothEnabled(enabled: Boolean): String {
+        val bluetoothAdapter = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            bluetoothManager?.adapter
+        } else {
+            @Suppress("DEPRECATION")
+            BluetoothAdapter.getDefaultAdapter()
+        } ?: throw IllegalStateException("无法获取蓝牙适配器")
+
+        // Android 12+ 需要蓝牙权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val hasPermission = checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+                return "Android 12+ 需要蓝牙权限，已打开蓝牙设置页，请手动${if (enabled) "开启" else "关闭"}"
+            }
+        }
+
+        // 尝试直接控制蓝牙
+        return if (enabled) {
+            if (!bluetoothAdapter.isEnabled) {
+                val success = bluetoothAdapter.enable()
+                if (success) "蓝牙已开启" else "蓝牙开启请求已发送"
+            } else {
+                "蓝牙已处于开启状态"
+            }
+        } else {
+            if (bluetoothAdapter.isEnabled) {
+                val success = bluetoothAdapter.disable()
+                if (success) "蓝牙已关闭" else "蓝牙关闭请求已发送"
+            } else {
+                "蓝牙已处于关闭状态"
+            }
+        }
     }
 }
